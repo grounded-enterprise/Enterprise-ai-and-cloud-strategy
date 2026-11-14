@@ -1,0 +1,13 @@
+# Test dependencies.
+#
+# The suite is written against the standard library `unittest`, so most of it
+# runs with nothing installed at all:
+#
+#     python3 -m unittest discover -s tests -t tests
+#
+# Install these to lift the skips (the schema tests need pydantic) and to run
+# the suite under pytest instead.
+
+-r requirements.txt
+
+pytest>=8.0

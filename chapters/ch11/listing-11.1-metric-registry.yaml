@@ -1,0 +1,33 @@
+# Enterprise AI Architecture & Cloud Strategy — companion code
+# Listing 11.1 — Metric registry entries (excerpt). The registry is tool-agnostic; a generator emits dashboards, alert rules, and attestation queries from it.
+#
+# Copyright 2026 Alan Hancock and Duane Cash / Chili Pepper Studios, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# github.com/grounded-enterprise/Enterprise-ai-and-cloud-strategy
+
+- id: ttft_p95
+  source: streaming_core            # Chapter 3
+  query: histogram_quantile(0.95, ttft_seconds)
+  unit: seconds
+  healthy: {op: '<', value: 0.5}
+  alarm:   {burn_rate: 14.4, window: 5m}   # fast-burn page
+  surfaces: [on_call, exec_rollup]
+  owner: sre_on_call
+
+- id: margin_leakage
+  source: metering_spine            # Chapter 6
+  query: (invoice_provider - cost_charged_to_tenants) / invoice_provider
+  unit: ratio
+  healthy: {op: '~=', value: 0, tol: 0.02}
+  alarm:   {op: '>', value: 0.05, window: 30d}
+  surfaces: [finance, exec_rollup]
+  owner: finops_cfo
+
+- id: residency_violation
+  source: audit_log                 # Chapter 8
+  query: count(routes where region != policy.region)
+  unit: count
+  healthy: {op: '==', value: 0}
+  alarm:   {op: '>', value: 0, mode: realtime}
+  surfaces: [compliance, exec_rollup]
+  owner: ciso

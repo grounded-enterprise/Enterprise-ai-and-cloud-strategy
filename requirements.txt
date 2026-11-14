@@ -1,0 +1,23 @@
+# Runtime dependencies, by concern. Nothing here is needed to run the capacity
+# maths or the audit ledger — both are standard library only.
+#
+# Install the whole file, or pick the lines for the parts you are using.
+
+# Unified request/response schema (reference/unified_schema.py)
+pydantic>=2.6,<3.0
+
+# Streaming gateway (reference/streaming_core.py)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+
+# Budget enforcement (chapters/ch06/listing-6.3-redis-budget-enforcement.py)
+redis>=5.0
+
+# Telemetry (reference/otel_instrumentation.py,
+#            chapters/ch07/listing-7.1-otel-genai-instrumentation.py)
+opentelemetry-api>=1.24
+opentelemetry-sdk>=1.24
+
+# Asymmetric signing for the audit ledger (extensions/audit_ledger.py).
+# Only required for Ed25519Signer; HMACSigner needs nothing.
+cryptography>=42.0

@@ -1,0 +1,130 @@
+# Enterprise AI Architecture & Cloud Strategy — companion code
+# Listing 1.1 — OpenAPI 3.1 definition for the multi-cloud gateway contract.
+#
+# Copyright 2026 Alan Hancock and Duane Cash / Chili Pepper Studios, Inc.
+# SPDX-License-Identifier: Apache-2.0
+# github.com/grounded-enterprise/Enterprise-ai-and-cloud-strategy
+
+openapi: 3.1.0
+info:
+  title: Enterprise Multi-Cloud AI Gateway API
+  version: 1.0.0
+  description: Provider-agnostic inference interface. Models are referenced by role.
+paths:
+  /v1/inference:
+    post:
+      operationId: executeInference
+      summary: Execute a provider-neutral inference request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnifiedInferenceRequest'
+      responses:
+        '200':
+          description: Standardized inference completion payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnifiedInferenceResponse'
+        '429':
+          description: Exhausted rate limits across all qualified providers
+        '503':
+          description: Target model role unavailable across all clouds
+components:
+  schemas:
+    UnifiedInferenceRequest:
+      type: object
+      required:
+        - model_role
+        - messages
+      properties:
+        model_role:
+          type: string
+          example: "reasoning-tier"
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        max_output_tokens:
+          type: integer
+          default: 1024
+        temperature:
+          type: number
+          default: 0.2
+        stream:
+          type: boolean
+          default: false
+        routing_constraints:
+          $ref: '#/components/schemas/RoutingConstraints'
+    Message:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type: string
+    RoutingConstraints:
+      type: object
+      properties:
+        residency:
+          type: string
+          default: "US"
+        zero_data_retention:
+          type: boolean
+          default: true
+        max_p95_latency_ms:
+          type: integer
+          default: 1500
+        cost_weight:
+          type: number
+          default: 0.5
+    UnifiedInferenceResponse:
+      type: object
+      required:
+        - content
+        - finish_reason
+        - usage
+        - resolved_binding
+      properties:
+        content:
+          type: string
+        finish_reason:
+          type: string
+          enum: [stop, truncated, content_filter, tool_call, error]
+        usage:
+          $ref: '#/components/schemas/Usage'
+        resolved_binding:
+          $ref: '#/components/schemas/ResolvedBinding'
+    Usage:
+      type: object
+      required:
+        - input_tokens
+        - output_tokens
+        - computed_cost_usd
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        computed_cost_usd:
+          type: number
+    ResolvedBinding:
+      type: object
+      required:
+        - provider
+        - model_id
+        - region
+      properties:
+        provider:
+          type: string
+          enum: [aws, azure, gcp, oci]
+        model_id:
+          type: string
+        region:
+          type: string
