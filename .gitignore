@@ -9,3 +9,6 @@ venv/
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# Working inventory. Kept on disk; not part of the public repository.
+INVENTORY.md
