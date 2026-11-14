@@ -5,9 +5,13 @@
 #
 #     python3 -m unittest discover -s tests -t tests
 #
-# Install these to lift the skips (the schema tests need pydantic) and to run
-# the suite under pytest instead.
+# Install these to lift the skips (the schema and chapter-listing tests need
+# pydantic, the contract tests need PyYAML) and to run the suite under pytest
+# instead.
 
 -r requirements.txt
 
 pytest>=8.0
+
+# Parses the OpenAPI contract and the metric registry (tests/test_contracts.py).
+pyyaml>=6.0

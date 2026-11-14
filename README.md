@@ -84,9 +84,11 @@ python3 -m unittest discover -s tests -t tests
 ```
 
 No installation required and no cloud credentials — the suite runs offline
-against recorded shapes and deterministic inputs. `pip install -r
-requirements-dev.txt` lifts the schema-test skips and lets the same suite run
-under `pytest tests` if you prefer.
+against recorded shapes and deterministic inputs. With nothing installed, the
+tests that need `pydantic`, `PyYAML` or the OpenTelemetry API skip. `pip install
+-r requirements-dev.txt` lifts the skips and lets the same suite run under
+`pytest tests` if you prefer. With dependencies present: 231 tests, 220 passing
+and 11 marked `expectedFailure`.
 
 What it pins:
 
@@ -98,13 +100,34 @@ What it pins:
 - **Redaction across frame boundaries** — an SSN split as `…123-45` / `-6789`
   must still be caught. This is the case that makes naive per-frame redaction
   wrong, and it is asserted both two-frame and character-by-character.
+- **Redaction under every chunking** — `tests/test_redaction_window.py` holds
+  `extensions/streaming_redaction.py` to one property: however a text is cut
+  into frames, the stream emits exactly what redacting the whole text returns.
+  Every kind of value is tried at every alignment against the window, and
+  several hundred generated texts are cut at random.
+- **Every chapter listing, executed** — `tests/test_chapter_listings.py` loads
+  each Python listing in `chapters/` by path and runs it: routing order and
+  failover, the three provider response shapes, the circuit breaker's states,
+  the cache's tenant scoping, the tool gate's approval tiers, the pricing
+  arithmetic, promotion and failback, and both audit chains.
+- **Contracts** — `tests/test_contracts.py` parses the OpenAPI contract, the
+  metric registry, the ledger SQL and the Terraform, and checks each against
+  the Python listing that describes the same thing: the contract's schemas
+  against the request models, the ledger's columns against the telemetry event.
 - **Delta extraction per provider**, which is the executable form of the
   response-shape tables in Chapter 2.
 - **Tamper evidence** — altering, deleting or reordering a committed block is
   detected, and re-signing a rewritten block still fails at the next block.
 
-Two tests are marked `expectedFailure`. They document a known defect rather
-than assert around it; see **Known issues** below.
+Eleven tests are marked `expectedFailure`. Each documents a known defect in a
+printed listing rather than asserting around it; see **Known issues** below.
+
+Three things the suite does not do. It does not run the Lua script in Listing
+6.3, which needs a Redis server. It does not run `terraform validate`, which
+needs the binary and the provider plugins. And where FastAPI or `redis` is not
+installed it registers a stand-in for the framework so the listing's own logic
+can still be exercised; with the real packages installed the stand-ins are
+never used.
 
 ---
 
@@ -155,6 +178,10 @@ Three functions carry the work:
 The redactor holds a bounded suffix as carry, so a value split across two frames — `…SSN is
 123-45` then `-6789` — is still caught. Redacting per frame without that carry leaks every
 value that straddles a chunk boundary.
+
+The carry protects a value while it is still arriving. It does not protect one that has
+arrived and is passing through the point where the window is cut; see **Known issues**, and
+use `extensions/streaming_redaction.py` in its place for real data.
 
 Do not buffer the whole body to make redaction easier. That trades away time-to-first-token,
 which is the metric users actually judge.
@@ -242,6 +269,43 @@ Three differences from the printed listing, each deliberate:
   or reordered block. Checking one entry against a predecessor hash the caller
   supplies assumes the caller already knows the right answer.
 
+### `extensions/streaming_redaction.py` — the redaction window, corrected
+
+```bash
+python3 extensions/streaming_redaction.py
+```
+
+The sliding window printed in Listings 4.1 and 10.2 keeps the last 32 characters
+and emits the rest. Where that cut falls inside a value, the value goes out in
+two pieces and neither piece matches a pattern (see **Known issues**). This
+module keeps the design, a bounded hold-back and no buffering of the completion,
+and changes how the window is cut:
+
+```python
+from streaming_redaction import StreamRedactor
+
+redactor = StreamRedactor()                 # one per response
+for delta in deltas:
+    safe = redactor.feed(delta)             # may be "", emit when non-empty
+tail = redactor.flush()                     # once, when the stream ends
+```
+
+Three differences from the printed loop, each deliberate:
+
+- **Match first, cut second.** Values are located on the whole window, and the
+  cut moves back to the start of any value it would split.
+- **The hold-back is sized from the patterns** and checked at import: 48
+  characters, against a longest bounded value of 38.
+- **A key still arriving is held by its own token.** `sk-…` has no upper length,
+  so no fixed hold-back covers it. A token that starts like a key is held from
+  its first character until it ends, up to `max_open_secret` (512), past which
+  it is redacted and the rest swallowed. Ordinary text is never delayed by this.
+
+The patterns, labels and Luhn check are Listing 10.2's, unchanged, so it drops
+into that listing's loop in place of the three window lines. It therefore shares
+the two limits of the printed card-number pattern listed under **Known issues**.
+Standard library only.
+
 ### `extensions/privatelink_oci.tf` — the fourth provider
 
 `reference/privatelink.tf` shows private-only ingress for AWS, Azure and GCP.
@@ -290,18 +354,62 @@ writing. Where a name has moved, the architecture is unaffected — the seam is 
 
 ## Known issues
 
-**Long API keys can evade redaction when split across stream frames.** The sliding window in
-`reference/streaming_core.py` holds back `_HOLDBACK = 32` characters, sized from
-`_LONGEST_PATTERN = 24`. The API-key pattern `sk-[A-Za-z0-9]{20,}` has no upper bound, so a key
-longer than the holdback is redacted when it arrives in one frame and passes through in the
-clear when it straddles a boundary — the exact failure the window exists to prevent, returning
-for the one pattern whose length is not capped. SSNs (11 characters) and card numbers are
-unaffected.
+Each of these is in a printed listing. The listings here are generated from the
+manuscript and are not hand-edited, so each stays as printed until the book
+changes, and each is pinned by a test marked `expectedFailure`. When a test
+reports *unexpected success*, the fix has landed and its decorator comes off.
 
-The fix is to bound the pattern and size the holdback from that bound; raising the constant on
-its own moves the hole rather than closing it. Two tests in
-`tests/test_streaming_core.py` are marked `expectedFailure` against this. When they start
-reporting *unexpected success*, the fix has landed and the decorators should come off.
+**The streaming redaction window emits values in clear.** Listings 4.1 and 10.2
+(`reference/streaming_core.py`). The loop keeps the last 32 characters and emits
+the rest; where the cut falls inside a value, the head goes out with the emitted
+text and the tail follows later, and neither half matches a pattern. Any SSN,
+card number or key followed by more than 32 characters of text is exposed, for
+most frame sizes: sent in ten-character frames, `Customer SSN is 123-45-6789.
+The account review is complete…` arrives with the SSN intact. A value at the
+very end of a stream is safe, which is why the frame-boundary tests in
+`tests/test_streaming_core.py` pass. **Use `extensions/streaming_redaction.py`
+for anything that carries real data.** Three tests in
+`tests/test_redaction_window.py`.
+
+**Long API keys can evade redaction when split across stream frames.** The same
+two listings. The API-key pattern `sk-[A-Za-z0-9]{20,}` has no upper bound, so
+no fixed hold-back can cover it. This was logged first, on 2026-08-18, as the
+only exposure; the window fault above is wider and includes it. Two tests in
+`tests/test_streaming_core.py`. `extensions/streaming_redaction.py` closes it.
+
+**A card number that follows another number is not redacted.** The card pattern
+in Listings 4.1 and 10.2 takes up to 19 digits across single spaces or hyphens.
+In `Order 12 4111 1111 1111 1111` it starts at `12`, runs into the card, fails
+the Luhn check on the combined digits and moves past them. It also takes the
+space after a card into the match, so `card 4111 1111 1111 1111 expires` becomes
+`card [REDACTED-PAN]expires`. Both hold for a whole text in one piece, and
+`extensions/streaming_redaction.py` shares them because it uses the printed
+patterns unchanged. Two tests in `tests/test_redaction_window.py`.
+
+**A tripped endpoint never recovers while a healthy peer exists.** Listing 3.1.
+`select_best_endpoint` calls `can_execute()` on every candidate, and for a
+half-open breaker that call spends a probe. A half-open endpoint is never chosen
+over a closed one, so its two probes are spent by selections that went
+elsewhere and it is left half-open with none. One test in
+`tests/test_chapter_listings.py`.
+
+**Break-even ignores included volume.** Listing 5.1. `compute_break_even_volume`
+divides the base fee by the rate difference and leaves out
+`provisioned_included_tokens_1m`. With volume included, it reports break-even
+too high and recommends on-demand across a range where provisioned capacity is
+cheaper. It is exact when nothing is included.
+`reference/crossover_calculator.py` does not have this fault. One test in
+`tests/test_chapter_listings.py`.
+
+**The soft-cap branch raises `NameError`.** Listing 6.3 calls `alert_owner(...)`,
+which it neither defines nor imports, so the first request past the soft cap
+fails where the comment says it is only notified. One test in
+`tests/test_chapter_listings.py`.
+
+**Listing 8.1 uses a variable declared nowhere.** It declares no variables of
+its own. Four of the five it uses are declared in `reference/privatelink.tf`;
+`oidc_thumbprint` is not declared in any file here. One test in
+`tests/test_contracts.py`.
 
 ## Licence
 
